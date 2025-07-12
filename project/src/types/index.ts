@@ -1,56 +1,53 @@
 export interface User {
-  id: string;
-  name: string;
+  uid: string;
   email: string;
-  location?: string;
-  profilePhoto?: string;
-  isPublic: boolean;
-  availability: string[];
+  displayName: string;
+  bio: string;
+  location: string;
+  avatar?: string;
   rating: number;
-  totalSwaps: number;
-  joinedDate: string;
-  isAdmin?: boolean;
+  reviewCount: number;
+  joinedAt: string;
 }
 
 export interface Skill {
   id: string;
-  name: string;
+  title: string;
+  description: string;
   category: string;
   level: 'Beginner' | 'Intermediate' | 'Advanced' | 'Expert';
-  description: string;
-}
-
-export interface UserSkill extends Skill {
   userId: string;
-  type: 'offered' | 'wanted';
+  userName: string;
+  userEmail: string;
+  location: string;
+  duration: string;
+  createdAt: string;
+  isActive: boolean;
+  tags: string[];
 }
 
 export interface SwapRequest {
   id: string;
   fromUserId: string;
   toUserId: string;
+  fromUserName: string;
+  toUserName: string;
   offeredSkillId: string;
   requestedSkillId: string;
-  status: 'pending' | 'accepted' | 'rejected' | 'completed' | 'cancelled';
+  offeredSkillTitle: string;
+  requestedSkillTitle: string;
   message: string;
+  status: 'pending' | 'accepted' | 'declined' | 'completed';
   createdAt: string;
   updatedAt: string;
 }
 
-export interface Rating {
+export interface ChatMessage {
   id: string;
-  swapRequestId: string;
-  fromUserId: string;
-  toUserId: string;
-  rating: number;
-  feedback: string;
-  createdAt: string;
-}
-
-export interface AdminStats {
-  totalUsers: number;
-  totalSwaps: number;
-  activeSwaps: number;
-  averageRating: number;
-  topSkills: { skill: string; count: number }[];
+  swapId: string;
+  senderId: string;
+  senderName: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
 }

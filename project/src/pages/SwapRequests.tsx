@@ -1,442 +1,240 @@
 import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { ArrowRightLeft, Clock, Check, X, MessageCircle, User } from 'lucide-react';
+import { ref, onValue, update } from 'firebase/database';
+import { database } from '../firebase/config';
 import { useAuth } from '../contexts/AuthContext';
-import { useApp } from '../contexts/AppContext';
-import { swapService } from '../services/swapService';
-import Card from '../components/UI/Card';
-import Button from '../components/UI/Button';
-import Badge from '../components/UI/Badge';
-import { toast } from '../components/UI/Toaster';
-import { 
-  MessageSquare, 
-  Clock, 
-  CheckCircle, 
-  XCircle, 
-  Star,
-  Trash2,
-  User,
-  ArrowRightLeft
-} from 'lucide-react';
+import { SwapRequest } from '../types';
+import toast from 'react-hot-toast';
 
-interface SwapRequest {
-  id: string;
-  senderId: string;
-  receiverId: string;
-  skillOffered: string;
-  skillWanted: string;
-  message: string;
-  status: 'pending' | 'accepted' | 'rejected' | 'completed';
-  createdAt: string;
-  senderName: string;
-  receiverName: string;
-}
-
-export default function SwapRequests() {
-  const { user } = useAuth();
-  const { swapRequests, setSwapRequests, addNotification } = useApp();
+export const SwapRequests: React.FC = () => {
+  const { currentUser } = useAuth();
+  const [swapRequests, setSwapRequests] = useState<SwapRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'received' | 'sent'>('received');
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [selectedSwap, setSelectedSwap] = useState<SwapRequest | null>(null);
-  const [feedbackData, setFeedbackData] = useState({
-    rating: 5,
-    comment: ''
-  });
 
   useEffect(() => {
-    loadSwapRequests();
-  }, []);
+    if (!currentUser) return;
 
-  const loadSwapRequests = async () => {
-    if (!user) return;
-    
-    try {
-      const requests = await swapService.getSwapRequests(user.id);
-      setSwapRequests(requests);
-    } catch (error) {
-      toast.error('Error', 'Failed to load swap requests');
-    } finally {
+    const swapsRef = ref(database, 'swaps');
+    const unsubscribe = onValue(swapsRef, (snapshot) => {
+      const requests: SwapRequest[] = [];
+      snapshot.forEach((child) => {
+        const swap = { id: child.key, ...child.val() } as SwapRequest;
+        if (swap.fromUserId === currentUser.uid || swap.toUserId === currentUser.uid) {
+          requests.push(swap);
+        }
+      });
+      setSwapRequests(requests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
       setLoading(false);
-    }
-  };
+    });
 
-  const receivedRequests = swapRequests.filter(req => req.receiverId === user?.id);
-  const sentRequests = swapRequests.filter(req => req.senderId === user?.id);
+    return unsubscribe;
+  }, [currentUser]);
 
-  const handleAcceptRequest = async (requestId: string) => {
+  const handleStatusUpdate = async (requestId: string, status: 'accepted' | 'declined') => {
     try {
-      await swapService.updateSwapStatus(requestId, 'accepted');
-      await loadSwapRequests();
-      
-      const request = swapRequests.find(req => req.id === requestId);
-      if (request) {
-        addNotification({
-          type: 'swap_accepted',
-          title: 'Swap Request Accepted',
-          message: `You accepted a swap request from ${request.senderName}`,
-          read: false
-        });
-      }
-      
-      toast.success('Request accepted', 'The swap request has been accepted');
-    } catch (error) {
-      toast.error('Error', 'Failed to accept request');
-    }
-  };
-
-  const handleRejectRequest = async (requestId: string) => {
-    try {
-      await swapService.updateSwapStatus(requestId, 'rejected');
-      await loadSwapRequests();
-      
-      const request = swapRequests.find(req => req.id === requestId);
-      if (request) {
-        addNotification({
-          type: 'swap_rejected',
-          title: 'Swap Request Rejected',
-          message: `You rejected a swap request from ${request.senderName}`,
-          read: false
-        });
-      }
-      
-      toast.success('Request rejected', 'The swap request has been rejected');
-    } catch (error) {
-      toast.error('Error', 'Failed to reject request');
-    }
-  };
-
-  const handleDeleteRequest = async (requestId: string) => {
-    try {
-      await swapService.deleteSwapRequest(requestId);
-      await loadSwapRequests();
-      toast.success('Request deleted', 'The swap request has been deleted');
-    } catch (error) {
-      toast.error('Error', 'Failed to delete request');
-    }
-  };
-
-  const handleMarkCompleted = async (request: SwapRequest) => {
-    setSelectedSwap(request);
-    setShowFeedbackModal(true);
-  };
-
-  const submitFeedback = async () => {
-    if (!selectedSwap || !user) return;
-
-    try {
-      // Submit feedback
-      await swapService.submitFeedback({
-        swapId: selectedSwap.id,
-        fromUserId: user.id,
-        toUserId: selectedSwap.senderId === user.id ? selectedSwap.receiverId : selectedSwap.senderId,
-        rating: feedbackData.rating,
-        comment: feedbackData.comment
+      await update(ref(database, `swaps/${requestId}`), {
+        status,
+        updatedAt: new Date().toISOString()
       });
-
-      // Mark swap as completed
-      await swapService.updateSwapStatus(selectedSwap.id, 'completed');
-      await loadSwapRequests();
-
-      addNotification({
-        type: 'swap_completed',
-        title: 'Swap Completed',
-        message: `You've completed a swap with ${selectedSwap.senderId === user.id ? selectedSwap.receiverName : selectedSwap.senderName}`,
-        read: false
-      });
-
-      toast.success('Feedback submitted', 'Thank you for your feedback!');
-      setShowFeedbackModal(false);
-      setSelectedSwap(null);
-      setFeedbackData({ rating: 5, comment: '' });
+      toast.success(`Request ${status} successfully`);
     } catch (error) {
-      toast.error('Error', 'Failed to submit feedback');
+      console.error('Error updating request:', error);
+      toast.error('Failed to update request');
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return <Clock className="w-4 h-4" />;
-      case 'accepted':
-        return <CheckCircle className="w-4 h-4" />;
-      case 'rejected':
-        return <XCircle className="w-4 h-4" />;
-      case 'completed':
-        return <Star className="w-4 h-4" />;
-      default:
-        return <MessageSquare className="w-4 h-4" />;
-    }
-  };
+  const receivedRequests = swapRequests.filter(req => req.toUserId === currentUser?.uid);
+  const sentRequests = swapRequests.filter(req => req.fromUserId === currentUser?.uid);
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending':
-        return 'warning';
-      case 'accepted':
-        return 'success';
-      case 'rejected':
-        return 'error';
-      case 'completed':
-        return 'info';
-      default:
-        return 'default';
+      case 'pending': return 'bg-yellow-100 text-yellow-800';
+      case 'accepted': return 'bg-green-100 text-green-800';
+      case 'declined': return 'bg-red-100 text-red-800';
+      case 'completed': return 'bg-blue-100 text-blue-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'pending': return 'Pending';
+      case 'accepted': return 'Accepted';
+      case 'declined': return 'Rejected';
+      case 'completed': return 'Completed';
+      default: return status;
     }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading requests...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Swap Requests</h1>
-        <p className="text-gray-600">Manage your incoming and outgoing skill swap requests</p>
-      </div>
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Swap Requests</h1>
+          <p className="text-gray-600">Manage your skill exchange requests</p>
+        </div>
 
-      {/* Tabs */}
-      <div className="flex space-x-1 mb-8">
-        <button
-          onClick={() => setActiveTab('received')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            activeTab === 'received'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          Received ({receivedRequests.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('sent')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            activeTab === 'sent'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          Sent ({sentRequests.length})
-        </button>
-      </div>
-
-      {/* Request Lists */}
-      <div className="space-y-6">
-        {activeTab === 'received' && (
-          <>
-            {receivedRequests.length === 0 ? (
-              <Card>
-                <div className="text-center py-12">
-                  <MessageSquare className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No received requests</h3>
-                  <p className="text-gray-600">When others request swaps with you, they'll appear here</p>
-                </div>
-              </Card>
-            ) : (
-              receivedRequests.map((request) => (
-                <Card key={request.id}>
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3 mb-3">
-                        <div className="w-10 h-10 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center">
-                          <User className="w-5 h-5 text-white" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-gray-900">{request.senderName}</h3>
-                          <p className="text-sm text-gray-600">
-                            {new Date(request.createdAt).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <Badge variant={getStatusColor(request.status) as any}>
-                          <div className="flex items-center space-x-1">
-                            {getStatusIcon(request.status)}
-                            <span className="capitalize">{request.status}</span>
-                          </div>
-                        </Badge>
-                      </div>
-
-                      <div className="flex items-center space-x-2 mb-3">
-                        <Badge variant="info">{request.skillOffered}</Badge>
-                        <ArrowRightLeft className="w-4 h-4 text-gray-400" />
-                        <Badge variant="warning">{request.skillWanted}</Badge>
-                      </div>
-
-                      {request.message && (
-                        <p className="text-gray-700 text-sm bg-gray-50 p-3 rounded-lg">
-                          "{request.message}"
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex space-x-2">
-                      {request.status === 'pending' && (
-                        <>
-                          <Button
-                            size="sm"
-                            onClick={() => handleAcceptRequest(request.id)}
-                          >
-                            Accept
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleRejectRequest(request.id)}
-                          >
-                            Reject
-                          </Button>
-                        </>
-                      )}
-                      {request.status === 'accepted' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleMarkCompleted(request)}
-                        >
-                          Mark Complete
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-              ))
-            )}
-          </>
-        )}
-
-        {activeTab === 'sent' && (
-          <>
-            {sentRequests.length === 0 ? (
-              <Card>
-                <div className="text-center py-12">
-                  <MessageSquare className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No sent requests</h3>
-                  <p className="text-gray-600">Browse skills to send your first swap request</p>
-                </div>
-              </Card>
-            ) : (
-              sentRequests.map((request) => (
-                <Card key={request.id}>
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3 mb-3">
-                        <div className="w-10 h-10 bg-gradient-to-r from-purple-600 to-pink-600 rounded-full flex items-center justify-center">
-                          <User className="w-5 h-5 text-white" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-gray-900">{request.receiverName}</h3>
-                          <p className="text-sm text-gray-600">
-                            Sent {new Date(request.createdAt).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <Badge variant={getStatusColor(request.status) as any}>
-                          <div className="flex items-center space-x-1">
-                            {getStatusIcon(request.status)}
-                            <span className="capitalize">{request.status}</span>
-                          </div>
-                        </Badge>
-                      </div>
-
-                      <div className="flex items-center space-x-2 mb-3">
-                        <Badge variant="info">{request.skillOffered}</Badge>
-                        <ArrowRightLeft className="w-4 h-4 text-gray-400" />
-                        <Badge variant="warning">{request.skillWanted}</Badge>
-                      </div>
-
-                      {request.message && (
-                        <p className="text-gray-700 text-sm bg-gray-50 p-3 rounded-lg">
-                          "{request.message}"
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex space-x-2">
-                      {request.status === 'pending' && (
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => handleDeleteRequest(request.id)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      )}
-                      {request.status === 'accepted' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleMarkCompleted(request)}
-                        >
-                          Mark Complete
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-              ))
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Feedback Modal */}
-      {showFeedbackModal && selectedSwap && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-4">
-              Complete Swap & Leave Feedback
-            </h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  How was your experience?
-                </label>
-                <div className="flex space-x-2">
-                  {[1, 2, 3, 4, 5].map((rating) => (
-                    <button
-                      key={rating}
-                      onClick={() => setFeedbackData(prev => ({ ...prev, rating }))}
-                      className={`p-1 ${
-                        rating <= feedbackData.rating
-                          ? 'text-yellow-500'
-                          : 'text-gray-300'
-                      }`}
-                    >
-                      <Star className="w-6 h-6 fill-current" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Comment (optional):
-                </label>
-                <textarea
-                  value={feedbackData.comment}
-                  onChange={(e) => setFeedbackData(prev => ({ ...prev, comment: e.target.value }))}
-                  placeholder="Share your experience with this skill swap..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  rows={3}
-                />
-              </div>
-
-              <div className="flex space-x-3 pt-4">
-                <Button onClick={submitFeedback} className="flex-1">
-                  Submit & Complete
-                </Button>
-                <Button 
-                  variant="secondary" 
-                  onClick={() => setShowFeedbackModal(false)}
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
+        {/* Tabs - Following Mockup Design */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
+          <div className="flex border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab('received')}
+              className={`flex-1 px-6 py-4 text-center font-medium transition-colors ${
+                activeTab === 'received'
+                  ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Swap Requests ({receivedRequests.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('sent')}
+              className={`flex-1 px-6 py-4 text-center font-medium transition-colors ${
+                activeTab === 'sent'
+                  ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Sent Requests ({sentRequests.length})
+            </button>
           </div>
         </div>
-      )}
+
+        {/* Requests List - Following Mockup Card Layout */}
+        <div className="space-y-4">
+          {(activeTab === 'received' ? receivedRequests : sentRequests).map((request) => (
+            <motion.div
+              key={request.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-xl border border-gray-200 p-6 hover:shadow-sm transition-shadow"
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center space-x-4">
+                  <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                    <span className="text-white font-medium">
+                      {(activeTab === 'received' ? request.fromUserName : request.toUserName).charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">
+                      {activeTab === 'received' ? request.fromUserName : request.toUserName}
+                    </h3>
+                    <div className="flex items-center space-x-2 text-sm text-gray-500">
+                      <Clock className="w-4 h-4" />
+                      <span>{new Date(request.createdAt).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(request.status)}`}>
+                  {getStatusText(request.status)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <h4 className="font-medium text-blue-900 mb-1">
+                    {activeTab === 'received' ? 'They Offer' : 'You Offer'}
+                  </h4>
+                  <p className="text-blue-800">{request.offeredSkillTitle}</p>
+                </div>
+                <div className="bg-green-50 rounded-lg p-4">
+                  <h4 className="font-medium text-green-900 mb-1">
+                    {activeTab === 'received' ? 'They Want' : 'You Want'}
+                  </h4>
+                  <p className="text-green-800">{request.requestedSkillTitle}</p>
+                </div>
+              </div>
+
+              {request.message && (
+                <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                  <h4 className="font-medium text-gray-900 mb-2">Message</h4>
+                  <p className="text-gray-700">{request.message}</p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  {request.status === 'accepted' && (
+                    <button className="flex items-center space-x-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors">
+                      <MessageCircle className="w-4 h-4" />
+                      <span>Chat</span>
+                    </button>
+                  )}
+                </div>
+
+                {activeTab === 'received' && request.status === 'pending' && (
+                  <div className="flex items-center space-x-2">
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => handleStatusUpdate(request.id, 'declined')}
+                      className="flex items-center space-x-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                      <span>Reject</span>
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => handleStatusUpdate(request.id, 'accepted')}
+                      className="flex items-center space-x-2 px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>Accept</span>
+                    </motion.button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          ))}
+
+          {(activeTab === 'received' ? receivedRequests : sentRequests).length === 0 && (
+            <div className="text-center py-12">
+              <ArrowRightLeft className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-xl font-medium text-gray-900 mb-2">
+                No {activeTab} requests
+              </h3>
+              <p className="text-gray-600">
+                {activeTab === 'received' 
+                  ? 'You haven\'t received any swap requests yet'
+                  : 'You haven\'t sent any swap requests yet'
+                }
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Pagination - Following Mockup */}
+        {(activeTab === 'received' ? receivedRequests : sentRequests).length > 6 && (
+          <div className="flex justify-center mt-8">
+            <div className="flex items-center space-x-2">
+              <button className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                &lt;
+              </button>
+              <button className="px-3 py-2 bg-blue-600 text-white rounded-lg">1</button>
+              <button className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">2</button>
+              <button className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">3</button>
+              <button className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                &gt;
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
-}
+};
