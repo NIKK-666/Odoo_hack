@@ -1,4 +1,4 @@
-Here's an updated `README.md` that includes the deployed link to your project:
+
 
 ---
 
@@ -90,4 +90,20 @@ This project is licensed under the MIT License.
 
 ---
 
+Problem Statement - **Skill Swap Platform**
+
+Team Leader Name
+**Nikhil Barman**
+
+Team Member 1
+Name
+**Arjit Singh Thakur**
+
+Team Member 2
+Name
+**Tanish Samir**
+
+Team Member 3
+Name
+**Aman Kishore**
 
