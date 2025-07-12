@@ -85,21 +85,7 @@ Odoo_hack/
 
 ---
 
-## 🔒 Firebase Security Rules Snapshot
 
-```json
-"swaps": {
-  ".read": "auth != null",
-  "$swapId": {
-    ".write": "auth != null && (
-      newData.child('fromUser').val() === auth.uid || 
-      newData.child('toUser').val() === auth.uid
-    )"
-  }
-}
-```
-
----
 
 
 ## 📄 License
